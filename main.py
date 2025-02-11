@@ -43,8 +43,16 @@ def index():
 
 @app.route("/admin")
 def admin():
+    status_filter = request.args.get("status")
     conn = get_db()
-    cursor = conn.execute("SELECT * FROM records")
+
+    if status_filter:
+        cursor = conn.execute(
+            "SELECT * FROM records WHERE status = ?", (status_filter,)
+        )
+    else:
+        cursor = conn.execute("SELECT * FROM records")
+
     records = cursor.fetchall()
 
     # 转换时间戳为 datetime 对象，并且使用时区感知
