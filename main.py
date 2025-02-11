@@ -79,7 +79,7 @@ def add_record():
     conn = get_db()
     conn.execute(
         "INSERT INTO records (call_sign, status, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (call_sign, "未回执", created_at, updated_at),
+        (call_sign.upper(), "未回执", created_at, updated_at),
     )
     conn.commit()
 
@@ -109,7 +109,9 @@ def update_status(id):
 def check_call_sign():
     call_sign = request.form["call_sign"]
     conn = get_db()
-    cursor = conn.execute("SELECT * FROM records WHERE call_sign = ?", (call_sign,))
+    cursor = conn.execute(
+        "SELECT * FROM records WHERE call_sign = ?", (call_sign.upper(),)
+    )
     record = cursor.fetchone()
 
     if record:
