@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, redirect, url_for
-
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -60,6 +59,7 @@ def admin():
     for record in records:
         # 转换为字典
         record_dict = dict(record)
+        record_dict["call_sign"] = record_dict["call_sign"].upper()
         record_dict["created_at"] = datetime.fromtimestamp(
             record_dict["created_at"], timezone.utc
         )
