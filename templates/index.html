@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QSL回执</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+</head>
+<body>
+
+<div class="main-container">
+    <h2 class="text-center">请输入你的呼号</h2>
+    <form id="callSignForm" method="POST">
+        <div class="form-group">
+            <input type="text" id="call_sign" class="form-control" placeholder="请输入呼号" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">发送回执</button>
+    </form>
+</div>
+
+<script>
+    $(document).ready(function() {
+        $("#callSignForm").submit(function(event) {
+            event.preventDefault();  // 阻止表单提交
+            var callSign = $("#call_sign").val();  // 获取呼号
+
+            // 使用 AJAX 请求
+            $.ajax({
+                url: "/check_call_sign",  // Flask 的路由
+                method: "POST",
+                data: { call_sign: callSign },
+                success: function(response) {
+                    // 弹出返回的消息
+                    alert(response);  // 使用 alert 弹出提示
+                },
+                error: function() {
+                    alert("请求失败，请稍后再试。");  // 如果请求失败弹出错误提示
+                }
+            });
+        });
+    });
+</script>
+
+<!-- 引入 Bootstrap JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/4.5.2/js/bootstrap.bundle.min.js"></script>
+
+</body>
+</html>

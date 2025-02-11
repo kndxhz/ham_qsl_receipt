@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="sidebar">
+        <ul>
+            <li><a href="/admin">全部</a></li>
+            <li><a href="/admin?status=已回执">已回执</a></li>
+            <li><a href="/admin?status=未回执">未回执</a></li>
+        </ul>
+    </div>
+
+    <div class="main-content">
+        <h2>记录管理</h2>
+
+        <form action="/add_record" method="POST">
+            <input type="text" name="call_sign" placeholder="添加的呼号..." required>
+            <button type="submit">添加</button>
+        </form>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>呼号</th>
+                    <th>状态</th>
+                    <th>添加时间</th>
+                    <th>更新时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                <tr>
+                    <td>{{ record['call_sign'] }}</td>
+                    <td>{{ record['status'] }}</td>
+                    <td>{{ record['created_at'].strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td>{{ record['updated_at'].strftime('%Y-%m-%d %H:%M:%S') }}</td>
+
+
+
+                    <td>
+                        <a href="/delete_record/{{ record['id'] }}">删除</a>
+                        {% if record['status'] == '未回执' %}
+                        <a href="/update_status/{{ record['id'] }}">回执</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

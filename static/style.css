@@ -1,0 +1,173 @@
+/* 通用样式 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background-image: url('https://t.alcy.cc/ycy');
+    background-size: cover;
+    color: white;
+}
+
+.container, .sidebar, .main-content {
+    border-radius: 15px;
+    backdrop-filter: blur(10px);
+    padding: 20px;
+    margin: 20px;
+}
+
+/* 侧边栏样式 */
+.sidebar {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    width: 200px;
+    background-color: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    border-radius: 15px;
+}
+
+.sidebar ul {
+    list-style: none;
+}
+
+.sidebar li {
+    margin: 10px 0;
+}
+
+.sidebar a {
+    color: white;
+    text-decoration: none;
+    padding: 5px 10px;
+    border-radius: 5px;
+}
+
+.sidebar a:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 主内容区域样式 */
+.main-content {
+    margin-left: 250px;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+th, td {
+    padding: 12px;
+    text-align: left;
+}
+
+th {
+    background-color: rgba(0, 0, 0, 0.7);
+}
+
+td {
+    background-color: rgba(0, 0, 0, 0.4);
+}
+
+button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+input {
+    padding: 10px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+}
+
+form {
+    margin-bottom: 20px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 150px;
+    }
+
+    .main-content {
+        margin-left: 180px;
+    }
+}
+/* 页面背景设置为毛玻璃效果 */
+body {
+    background-image: url('https://t.alcy.cc/ycy');  /* 背景图 */
+    background-size: cover;
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+/* 主容器，居中显示，圆角毛玻璃效果 */
+.main-container {
+    background: rgba(255, 255, 255, 0.2);  /* 半透明白色背景 */
+    backdrop-filter: blur(10px);  /* 毛玻璃效果 */
+    border-radius: 15px;
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    text-align: center;
+}
+
+/* 输入框样式 */
+input[type="text"] {
+    width: 100%;
+    padding: 15px;
+    margin: 10px 0;
+    border: 2px solid #ccc;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.8);
+    font-size: 16px;
+    color: #333;
+    transition: border-color 0.3s ease;
+}
+
+/* 输入框聚焦时的效果 */
+input[type="text"]:focus {
+    border-color: #4caf50;
+    outline: none;
+    background-color: rgba(255, 255, 255, 0.9);
+}
+
+/* 按钮样式 */
+button {
+    background-color: #4caf50;
+    color: white;
+    border: none;
+    padding: 15px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+/* 按钮悬停效果 */
+button:hover {
+    background-color: #45a049;
+    transform: scale(1.05);
+}
+
+/* 按钮点击效果 */
+button:active {
+    transform: scale(0.98);
+}
