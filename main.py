@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, session
 import sqlite3
 import time
 from datetime import datetime, timezone
 
 app = Flask(__name__)
+app.secret_key = "your_secret_key"  # 添加一个密钥用于会话管理
 
 
 # 添加自定义的日期过滤器
@@ -40,8 +41,18 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/admin")
+@app.route("/admin", methods=["GET", "POST"])
 def admin():
+    if request.method == "POST":
+        password = request.form.get("password")
+        if password == "123456":
+            session["admin_logged_in"] = True
+        else:
+            return "密码错误，请重试。"
+
+    if not session.get("admin_logged_in"):
+        return render_template("admin_login.html")
+
     status_filter = request.args.get("status")
     conn = get_db()
 
@@ -69,6 +80,12 @@ def admin():
         updated_records.append(record_dict)
 
     return render_template("admin.html", records=updated_records)
+
+
+@app.route("/logout")
+def logout():
+    session.pop("admin_logged_in", None)
+    return redirect(url_for("admin"))
 
 
 @app.route("/add_record", methods=["POST"])
