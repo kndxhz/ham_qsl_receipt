@@ -73,13 +73,13 @@ def admin():
 
 @app.route("/add_record", methods=["POST"])
 def add_record():
-    call_sign = request.form["call_sign"]
+    call_sign = request.form["call_sign"].upper()
     created_at = updated_at = int(time.time())
 
     conn = get_db()
     conn.execute(
         "INSERT INTO records (call_sign, status, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (call_sign.upper(), "未回执", created_at, updated_at),
+        (call_sign, "未回执", created_at, updated_at),
     )
     conn.commit()
 
@@ -107,11 +107,9 @@ def update_status(id):
 
 @app.route("/check_call_sign", methods=["POST"])
 def check_call_sign():
-    call_sign = request.form["call_sign"]
+    call_sign = request.form["call_sign"].upper()
     conn = get_db()
-    cursor = conn.execute(
-        "SELECT * FROM records WHERE call_sign = ?", (call_sign.upper(),)
-    )
+    cursor = conn.execute("SELECT * FROM records WHERE call_sign = ?", (call_sign,))
     record = cursor.fetchone()
 
     if record:
