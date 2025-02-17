@@ -126,11 +126,23 @@ def update_status(id):
 def check_call_sign():
     call_sign = request.form["call_sign"].upper()
     conn = get_db()
-    cursor = conn.execute("SELECT * FROM records WHERE call_sign = ?", (call_sign,))
+    cursor = conn.execute(
+        "SELECT status FROM records WHERE call_sign = ?", (call_sign,)
+    )
     record = cursor.fetchone()
 
     if record:
-        return "收到啦！已记录回执，期待空中相遇，73"
+        status = record["status"]
+        if status == "已回执":
+            return "不要在提交啦！o(>﹏<)o\n数据已经记录到后台啦！"
+        else:
+            # updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                "UPDATE records SET status = '已回执', updated_at = ? WHERE call_sign = ?",
+                (int(time.time()), call_sign),
+            )
+            conn.commit()
+            return "收到啦！已记录回执，期待空中相遇，73"
     else:
         return "未找到数据，请联系：755848971"
 
