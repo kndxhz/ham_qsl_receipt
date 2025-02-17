@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # 添加一个密钥用于会话管理
 
+# todo：将sqlite改为短连接
+
 
 # 添加自定义的日期过滤器
 @app.template_filter("date")
