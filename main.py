@@ -5,8 +5,6 @@ from datetime import datetime, timezone
 import logging
 import os
 
-# todo:添加已发邮件标记
-
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # 添加一个密钥用于会话管理
@@ -139,16 +137,16 @@ def check_call_sign():
     if record:
         status = record["status"]
         if status == "已回执":
-            return "不要在提交啦！o(>﹏<)o\n数据已经记录到后台啦！"
+            return "不要再提交啦！o(>﹏<)o\n数据已经记录到后台啦！"
         else:
             conn.execute(
                 "UPDATE records SET status = '已回执', updated_at = ? WHERE call_sign = ?",
                 (int(time.time()), call_sign),
             )
             conn.commit()
-            return "收到啦！已记录回执，期待空中相遇，73"
+            return "收到啦！(￣▽￣)~*\nCiallo～(∠·ω< )⌒★\n已记录回执，期待空中相遇，73"
     else:
-        return "未找到数据，请联系：755848971"
+        return "未找到数据(；′⌒`)\n请联系QQ：755848971"
 
 
 if __name__ == "__main__":
