@@ -3,6 +3,10 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 import logging
+import os
+
+# todo:添加已发邮件标记
+
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # 添加一个密钥用于会话管理
@@ -16,22 +20,25 @@ def format_date(value, format="%Y-%m-%d %H:%M:%S"):
     return ""
 
 
+# 初始化数据库
+def init_db():
+    conn = get_db()
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        call_sign TEXT NOT NULL,
+                        status TEXT DEFAULT '未回执',
+                        created_at INTEGER,
+                        updated_at INTEGER)"""
+    )
+    conn.commit()
+
+
+# 连接数据库
 def get_db():
-    """获取数据库连接"""
-    logging.info("获取数据库连接")
-    db = getattr(g, "_database", None)
-    if db is None:
-        db = g._database = sqlite3.connect("database.db")
-        db.row_factory = sqlite3.Row
-    return db
-
-
-@app.teardown_appcontext
-def close_connection(exception):
-    """关闭数据库连接"""
-    db = getattr(g, "_database", None)
-    if db is not None:
-        db.close()
+    conn = sqlite3.connect("database.db")
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 @app.route("/")
@@ -145,4 +152,7 @@ def check_call_sign():
 
 
 if __name__ == "__main__":
+    if not os.path.exists("database.db"):
+        init_db()
+
     app.run(host="0.0.0.0")
