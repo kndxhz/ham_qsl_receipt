@@ -1,12 +1,14 @@
 import pandas as pd
 import sqlite3
 
-# todo:删除第一行id，汉化列名，更新日期格式
-
 
 def export_to_excel():
     conn = sqlite3.connect("database.db")
     df = pd.read_sql_query("SELECT * FROM records", conn)
+
+    df.drop("id", axis=1, inplace=True)
+    df.columns = ["呼号", "状态", "创建时间", "更新时间"]
+    print(df)
     df.to_excel("QSL.xlsx", index=False)
     conn.close()
 

@@ -1,12 +1,11 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, session, g
 import sqlite3
 import time
 from datetime import datetime, timezone
+import logging
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # 添加一个密钥用于会话管理
-
-# todo：将sqlite改为短连接
 
 
 # 添加自定义的日期过滤器
@@ -17,25 +16,22 @@ def format_date(value, format="%Y-%m-%d %H:%M:%S"):
     return ""
 
 
-# 连接数据库
 def get_db():
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row
-    return conn
+    """获取数据库连接"""
+    logging.info("获取数据库连接")
+    db = getattr(g, "_database", None)
+    if db is None:
+        db = g._database = sqlite3.connect("database.db")
+        db.row_factory = sqlite3.Row
+    return db
 
 
-# 初始化数据库
-def init_db():
-    conn = get_db()
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS records (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        call_sign TEXT NOT NULL,
-                        status TEXT DEFAULT '未回执',
-                        created_at INTEGER,
-                        updated_at INTEGER)"""
-    )
-    conn.commit()
+@app.teardown_appcontext
+def close_connection(exception):
+    """关闭数据库连接"""
+    db = getattr(g, "_database", None)
+    if db is not None:
+        db.close()
 
 
 @app.route("/")
@@ -138,7 +134,6 @@ def check_call_sign():
         if status == "已回执":
             return "不要在提交啦！o(>﹏<)o\n数据已经记录到后台啦！"
         else:
-            # updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             conn.execute(
                 "UPDATE records SET status = '已回执', updated_at = ? WHERE call_sign = ?",
                 (int(time.time()), call_sign),
@@ -150,5 +145,4 @@ def check_call_sign():
 
 
 if __name__ == "__main__":
-    init_db()
     app.run(host="0.0.0.0")
