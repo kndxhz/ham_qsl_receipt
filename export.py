@@ -8,12 +8,12 @@ def export_to_excel():
     print(df)
     df.drop("id", axis=1, inplace=True)
     df.columns = ["呼号", "状态", "创建时间", "更新时间"]
-    df["创建时间"] = pd.to_datetime(df["创建时间"], unit="s").dt.strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
-    df["更新时间"] = pd.to_datetime(df["更新时间"], unit="s").dt.strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    df["创建时间"] = (
+        pd.to_datetime(df["创建时间"], unit="s") + pd.Timedelta(hours=8)
+    ).dt.strftime("%Y-%m-%d %H:%M:%S")
+    df["更新时间"] = (
+        pd.to_datetime(df["更新时间"], unit="s") + pd.Timedelta(hours=8)
+    ).dt.strftime("%Y-%m-%d %H:%M:%S")
     print(df)
     df.to_excel("QSL.xlsx", index=False)
     conn.close()
