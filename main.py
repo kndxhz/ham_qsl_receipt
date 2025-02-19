@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session, g
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 import os
 
@@ -76,10 +76,10 @@ def admin():
         record_dict["call_sign"] = record_dict["call_sign"].upper()
         record_dict["created_at"] = datetime.fromtimestamp(
             record_dict["created_at"], timezone.utc
-        )
+        ).astimezone(timezone(timedelta(hours=8)))
         record_dict["updated_at"] = datetime.fromtimestamp(
             record_dict["updated_at"], timezone.utc
-        )
+        ).astimezone(timezone(timedelta(hours=8)))
         updated_records.append(record_dict)
 
     return render_template("admin.html", records=updated_records)
