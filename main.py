@@ -5,6 +5,9 @@ from datetime import datetime, timezone, timedelta
 import logging
 import os
 
+####################################
+# TODO :添加邮件通知
+####################################
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"  # 添加一个密钥用于会话管理
