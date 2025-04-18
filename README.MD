@@ -1,3 +1,6 @@
+> [!WARNING]
+> 此版本已被弃用并重构，请使用 [新版本](https://github.com/kndxhz/ham_qsl_receipt)
+
 # QSL回执管理系统
 
 ## 项目简介
