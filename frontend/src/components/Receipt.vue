@@ -92,20 +92,63 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 呼号未找到提醒对话框 -->
+    <el-dialog
+      v-model="notFoundDialogVisible"
+      title="呼号未找到"
+      width="500px"
+      center
+    >
+      <div style="text-align: center;">
+        <el-icon size="60" color="#F56C6C">
+          <WarningFilled />
+        </el-icon>
+        <p style="margin-top: 20px; font-size: 16px;">
+          未找到呼号 <strong>{{ notFoundCallSign }}</strong>，呼号是否输入错误？
+        </p>
+        
+        <el-divider>请检查</el-divider>
+        
+        <el-card class="tips-card">
+          <div class="tips-info">
+            <p><strong>请确认：</strong></p>
+            <p>• 呼号输入是否正确</p>
+            <p>• 是否和管理员申请QSL</p>
+            <p>• 呼号是否与提供给管理员的一致</p>
+          </div>
+        </el-card>
+        
+        <p style="margin-top: 15px; font-size: 14px; color: #666;">
+          如确认呼号正确，请联系管理员
+        </p>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="notFoundDialogVisible = false">
+            取消
+          </el-button>
+          <el-button type="primary" @click="retryInput">
+            重新输入
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script>
 import { ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { User, SuccessFilled } from '@element-plus/icons-vue'
+import { User, SuccessFilled, WarningFilled } from '@element-plus/icons-vue'
 import { apiService } from '../api'
 
 export default {
   name: 'Receipt',
   components: {
     User,
-    SuccessFilled
+    SuccessFilled,
+    WarningFilled
   },
   setup() {
     const receiptData = reactive({
@@ -114,8 +157,10 @@ export default {
 
     const loading = ref(false)
     const successDialogVisible = ref(false)
+    const notFoundDialogVisible = ref(false)
     const receiptForm = ref()
     const submittedCallSign = ref('')
+    const notFoundCallSign = ref('')
 
     const rules = {
       callSign: [
@@ -145,7 +190,8 @@ export default {
       } catch (error) {
         console.error('回执失败:', error)
         if (error.response?.status === 404) {
-          ElMessage.error('呼号不存在，请检查呼号是否正确')
+          notFoundCallSign.value = receiptData.callSign.toUpperCase()
+          notFoundDialogVisible.value = true
         } else {
           ElMessage.error('回执失败，请稍后重试')
         }
@@ -154,16 +200,26 @@ export default {
       }
     }
 
+    const retryInput = () => {
+      notFoundDialogVisible.value = false
+      receiptData.callSign = ''
+      receiptForm.value.resetFields()
+    }
+
     return {
       receiptData,
       rules,
       loading,
       successDialogVisible,
+      notFoundDialogVisible,
       receiptForm,
       submittedCallSign,
+      notFoundCallSign,
       submitReceipt,
+      retryInput,
       User,
-      SuccessFilled
+      SuccessFilled,
+      WarningFilled
     }
   }
 }
@@ -226,5 +282,20 @@ export default {
 
 .address-info strong {
   color: #409eff;
+}
+
+.tips-card {
+  margin: 20px 0;
+  text-align: left;
+}
+
+.tips-info p {
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.tips-info strong {
+  color: #F56C6C;
 }
 </style>
