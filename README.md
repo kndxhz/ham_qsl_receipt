@@ -12,14 +12,6 @@
 
 ## 快速启动
 
-### 方法1: 使用启动脚本 (推荐)
-```bash
-# Windows用户
-./start.bat
-```
-
-### 方法2: 手动启动
-
 #### 启动后端
 ```bash
 # 安装Python依赖
@@ -43,7 +35,7 @@ npm run dev
 
 - **前端界面**: http://localhost:3000
   - 普通用户回执页面: http://localhost:3000/
-  - 管理员界面: http://localhost:3000/admin (密码: passw0rd)
+  - 管理员界面: http://localhost:3000/admin
 - **后端API**: http://localhost:5000
 
 ## 功能说明

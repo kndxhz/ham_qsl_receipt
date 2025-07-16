@@ -4,10 +4,26 @@ const API_BASE = '/api'
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 10000
+  timeout: 10000,
+  withCredentials: true  // 允许发送cookies
 })
 
 export const apiService = {
+  // 管理员登录
+  adminLogin(password) {
+    return api.post('/admin/login', { password })
+  },
+
+  // 管理员登出
+  adminLogout() {
+    return api.post('/admin/logout')
+  },
+
+  // 验证管理员session
+  adminVerify() {
+    return api.get('/admin/verify')
+  },
+
   // 添加记录
   addRecord(callSign, info) {
     return api.get('/add_record', {

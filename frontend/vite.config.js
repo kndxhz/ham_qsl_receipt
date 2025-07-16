@@ -9,7 +9,15 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        configure: (proxy, options) => {
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            // 转发cookies
+            if (req.headers.cookie) {
+              proxyReq.setHeader('cookie', req.headers.cookie)
+            }
+          })
+        }
       }
     }
   }

@@ -6,6 +6,8 @@ import requests
 import bs4
 import datetime
 import pytz  # 添加pytz库来处理时区
+import hashlib
+import secrets
 from openai import OpenAI
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask_cors import CORS  # 添加CORS支持
@@ -15,6 +17,110 @@ CORS(flask_app)  # 启用CORS
 
 # 设置时区
 shanghai_tz = pytz.timezone("Asia/Shanghai")
+
+# 管理员密码（在实际部署时应该使用环境变量）
+ADMIN_PASSWORD = "你的密码"
+
+# 存储有效的管理员session
+admin_sessions = {}
+
+
+def generate_session_token():
+    """生成安全的session token"""
+    return secrets.token_urlsafe(32)
+
+
+def verify_admin_session(request):
+    """验证管理员session"""
+    session_token = request.cookies.get("admin_session")
+    if not session_token or session_token not in admin_sessions:
+        return False
+
+    session_data = admin_sessions[session_token]
+    # 检查session是否过期
+    if datetime.datetime.now(shanghai_tz) > session_data["expires"]:
+        del admin_sessions[session_token]
+        return False
+
+    return True
+
+
+def admin_required(f):
+    """管理员权限装饰器"""
+
+    def wrapper(*args, **kwargs):
+        if not verify_admin_session(flask.request):
+            return json.dumps({"status": 401, "message": "需要管理员权限"}), 401
+        return f(*args, **kwargs)
+
+    wrapper.__name__ = f.__name__
+    return wrapper
+
+
+@flask_app.route("/admin/login", methods=["POST"])
+def admin_login():
+    """管理员登录"""
+    try:
+        data = flask.request.get_json()
+        password = data.get("password")
+
+        if password == ADMIN_PASSWORD:
+            # 生成session token
+            session_token = generate_session_token()
+            expires = datetime.datetime.now(shanghai_tz) + datetime.timedelta(days=1)
+
+            admin_sessions[session_token] = {
+                "expires": expires,
+                "created": datetime.datetime.now(shanghai_tz),
+            }
+
+            response = flask.make_response(
+                json.dumps(
+                    {
+                        "status": 200,
+                        "message": "登录成功",
+                        "expires": expires.isoformat(),
+                    }
+                )
+            )
+
+            # 设置HttpOnly cookie，增加安全性
+            response.set_cookie(
+                "admin_session",
+                session_token,
+                max_age=24 * 60 * 60,  # 1天
+                httponly=True,
+                secure=False,  # 在生产环境中应该设为True
+                samesite="Lax",
+            )
+
+            return response
+        else:
+            return json.dumps({"status": 401, "message": "密码错误"}), 401
+
+    except Exception as e:
+        return json.dumps({"status": 500, "message": f"登录失败: {str(e)}"}), 500
+
+
+@flask_app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    """管理员登出"""
+    session_token = flask.request.cookies.get("admin_session")
+    if session_token and session_token in admin_sessions:
+        del admin_sessions[session_token]
+
+    response = flask.make_response(json.dumps({"status": 200, "message": "已登出"}))
+    response.set_cookie("admin_session", "", expires=0)
+    return response
+
+
+@flask_app.route("/admin/verify", methods=["GET"])
+def admin_verify():
+    """验证管理员session是否有效"""
+    if verify_admin_session(flask.request):
+        return json.dumps({"status": 200, "message": "认证有效"})
+    else:
+        return json.dumps({"status": 401, "message": "认证无效"}), 401
 
 
 # 空函数占位符，用于邮件和微信提醒
@@ -87,6 +193,7 @@ def index():
 
 
 @flask_app.route("/add_record", methods=["GET"])
+@admin_required
 def add_record():
     conn, curs = get_db()
     try:
@@ -110,6 +217,7 @@ def add_record():
 
 
 @flask_app.route("/llm", methods=["GET"])
+@admin_required
 def llm():
     global client
     if client is None:
@@ -180,6 +288,7 @@ def llm():
 
 
 @flask_app.route("/mark_sent", methods=["GET"])
+@admin_required
 def mark_sent():
     """标记卡片已发送"""
     conn, curs = get_db()
@@ -226,7 +335,54 @@ def receipt():
         conn.close()
 
 
+@flask_app.route("/mark_received", methods=["GET"])
+@admin_required
+def mark_received():
+    """管理员标记已回执"""
+    conn, curs = get_db()
+    try:
+        call_sign = flask.request.args.get("call_sign")
+        if not call_sign:
+            return json.dumps({"status": 400, "message": "缺少呼号参数"})
+
+        # 检查记录是否存在且状态为sent
+        existing = conn.execute(
+            "SELECT status FROM record WHERE call_sign = ?", (call_sign,)
+        ).fetchone()
+
+        if not existing:
+            return json.dumps({"status": 404, "message": "记录不存在"})
+
+        if existing[0] != "sent":
+            return json.dumps(
+                {
+                    "status": 400,
+                    "message": f"只能标记已发送状态的记录为已回执，当前状态: {existing[0]}",
+                }
+            )
+
+        # 使用带时区的当前时间
+        current_time = datetime.datetime.now(shanghai_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn.execute(
+            "UPDATE record SET receipt_time=?, status='received' WHERE call_sign=?",
+            (current_time, call_sign),
+        )
+        conn.commit()
+
+        # 发送提醒
+        message = f"呼号{call_sign}已被管理员标记为已回执"
+        send_email_reminder(call_sign, message)
+        send_wechat_reminder(call_sign, message)
+
+        print(f"呼号 {call_sign} 已被管理员标记为已回执")
+        return json.dumps({"status": 200, "message": "已标记为已回执"})
+    finally:
+        conn.close()
+
+
 @flask_app.route("/resend", methods=["GET"])
+@admin_required
 def resend():
     """标记卡片需要补发"""
     conn, curs = get_db()
@@ -262,6 +418,7 @@ def resend():
 
 
 @flask_app.route("/get_expired", methods=["GET"])
+@admin_required
 def get_expired():
     """获取超过一个月未回执的记录"""
     conn, curs = get_db()
@@ -284,6 +441,7 @@ def get_expired():
 
 
 @flask_app.route("/get_resend_list", methods=["GET"])
+@admin_required
 def get_resend_list():
     """获取需要补发的记录列表"""
     conn, curs = get_db()
@@ -299,6 +457,7 @@ def get_resend_list():
 
 
 @flask_app.route("/get_all_records", methods=["GET"])
+@admin_required
 def get_all_records():
     """获取所有记录"""
     conn, curs = get_db()
@@ -311,6 +470,7 @@ def get_all_records():
 
 
 @flask_app.route("/delete_record", methods=["GET"])
+@admin_required
 def delete_record():
     """删除记录"""
     call_sign = flask.request.args.get("call_sign")
@@ -340,6 +500,7 @@ def delete_record():
 
 
 @flask_app.route("/edit_record", methods=["POST"])
+@admin_required
 def edit_record():
     """编辑记录信息"""
     try:
@@ -404,6 +565,7 @@ def edit_record():
 
 
 @flask_app.route("/llm_single", methods=["GET"])
+@admin_required
 def llm_single():
     """对单个记录进行AI地址分析"""
     global client
@@ -584,7 +746,7 @@ client = None
 def init_openai_client():
     global client
     client = OpenAI(
-        api_key="你的Deepseek api key",
+        api_key="你的API密钥",
         base_url="https://api.deepseek.com",
     )
 

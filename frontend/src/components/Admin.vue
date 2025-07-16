@@ -17,7 +17,7 @@
             type="password"
             placeholder="请输入管理员密码"
             show-password
-            @keyup.enter="verifyPassword"
+            @keydown.enter.prevent="verifyPassword"
           />
         </el-form-item>
       </el-form>
@@ -112,7 +112,7 @@
                 <el-input 
                   v-model="addData.callSign" 
                   placeholder="请输入呼号"
-                  @keyup.enter="addRecord"
+                  @keydown.enter.prevent="addRecord"
                 />
               </el-form-item>
               <el-form-item label="地址信息" prop="info">
@@ -518,16 +518,55 @@ export default {
     onMounted(() => {
       document.addEventListener('click', hideContextMenu)
       document.addEventListener('contextmenu', hideContextMenu)
+      // 检查是否已经登录
+      checkAuthStatus()
     })
 
-    const verifyPassword = () => {
-      if (password.value === 'passw0rd') {
-        authenticated.value = true
-        passwordDialogVisible.value = false
-        loadRecords()
-      } else {
-        ElMessage.error('密码错误')
+    const checkAuthStatus = async () => {
+      try {
+        const response = await apiService.adminVerify()
+        if (response.data.status === 200) {
+          authenticated.value = true
+          passwordDialogVisible.value = false
+          loadRecords()
+        }
+      } catch (error) {
+        // 认证失败，保持登录对话框显示
+        authenticated.value = false
+        passwordDialogVisible.value = true
+      }
+    }
+
+    const verifyPassword = async () => {
+      if (!password.value.trim()) {
+        ElMessage.error('请输入密码')
+        return
+      }
+
+      try {
+        verifying.value = true
+        const response = await apiService.adminLogin(password.value)
+        
+        if (response.data.status === 200) {
+          authenticated.value = true
+          passwordDialogVisible.value = false
+          password.value = ''
+          ElMessage.success('登录成功')
+          loadRecords()
+        } else {
+          ElMessage.error(response.data.message || '登录失败')
+          password.value = ''
+        }
+      } catch (error) {
+        console.error('登录失败:', error)
+        if (error.response?.status === 401) {
+          ElMessage.error('密码错误')
+        } else {
+          ElMessage.error('登录失败，请稍后重试')
+        }
         password.value = ''
+      } finally {
+        verifying.value = false
       }
     }
 
@@ -535,10 +574,20 @@ export default {
       router.push('/')
     }
 
-    const logout = () => {
-      authenticated.value = false
-      passwordDialogVisible.value = true
-      password.value = ''
+    const logout = async () => {
+      try {
+        await apiService.adminLogout()
+        authenticated.value = false
+        passwordDialogVisible.value = true
+        password.value = ''
+        ElMessage.success('已退出登录')
+      } catch (error) {
+        console.error('登出失败:', error)
+        // 即使登出失败也清除本地状态
+        authenticated.value = false
+        passwordDialogVisible.value = true
+        password.value = ''
+      }
     }
 
     const addRecord = async () => {
@@ -1111,6 +1160,7 @@ export default {
       editForm,
       editData,
       editRules,
+      checkAuthStatus,
       verifyPassword,
       goBack,
       logout,
