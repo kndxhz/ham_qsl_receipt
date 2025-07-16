@@ -5,9 +5,31 @@ import json
 import requests
 import bs4
 import datetime
+import pytz  # 添加pytz库来处理时区
 from openai import OpenAI
+from apscheduler.schedulers.background import BackgroundScheduler
+from flask_cors import CORS  # 添加CORS支持
 
 flask_app = flask.Flask(__name__)
+CORS(flask_app)  # 启用CORS
+
+# 设置时区
+shanghai_tz = pytz.timezone("Asia/Shanghai")
+
+
+# 空函数占位符，用于邮件和微信提醒
+def send_email_reminder(call_sign, message):
+    """邮件提醒函数（留空供用户自定义实现）"""
+    # 用户自定义邮件发送逻辑
+    print(f"邮件提醒: {call_sign} - {message}")
+    pass
+
+
+def send_wechat_reminder(call_sign, message):
+    """微信提醒函数（留空供用户自定义实现）"""
+    # 用户自定义微信发送逻辑
+    print(f"微信提醒: {call_sign} - {message}")
+    pass
 
 
 def get_zip_code(address: str):
@@ -41,10 +63,8 @@ def get_zip_code(address: str):
                     zip_code = text.split("：")[1]
                     return zip_code
         except Exception as e:
-            # print(f"匹配错误: {e}")
             pass
         address = address[:-1]
-        print(f"尝试: {address}")
     return None
 
 
@@ -52,11 +72,11 @@ def get_zip_code(address: str):
 def zip_code_():
     request = flask.request.args
     address = request.get("address")
-    zip_code = get_zip_code(address)
-    if zip_code:
-        return json.dumps({"zip_code": int(zip_code)})
-    else:
-        return json.dumps({"zip_code": -1}), 404
+    if address:
+        zip_code = get_zip_code(address)
+        if zip_code:
+            return json.dumps({"zip_code": int(zip_code)})
+    return json.dumps({"zip_code": -1}), 404
 
 
 @flask_app.route("/")
@@ -68,122 +88,517 @@ def index():
 
 @flask_app.route("/add_record", methods=["GET"])
 def add_record():
-    db = get_db()
-    conn = db[0]
-    curs = db[1]
-    request = flask.request.args
-    info = request.get("info")
-    call_sign = request.get("call_sign")
+    conn, curs = get_db()
+    try:
+        request = flask.request.args
+        info = request.get("info")
+        call_sign = request.get("call_sign")
 
-    conn.execute(
-        """\
-INSERT OR REPLACE INTO record (call_sign,original_address,add_time) VALUES (?,?,?)""",
-        (call_sign, info, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    conn.commit()
-    return json.dumps(
-        {
-            "status": 200,
-            "info": "ok",
-            "call_sign": call_sign,
-        }
-    )
+        # 使用带时区的当前时间
+        current_time = datetime.datetime.now(shanghai_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn.execute(
+            """INSERT OR REPLACE INTO record 
+            (call_sign, info, original_address, add_time, status) 
+            VALUES (?, ?, ?, ?, ?)""",
+            (call_sign, info, info, current_time, "pending"),
+        )
+        conn.commit()
+        return json.dumps({"status": 200, "info": "ok", "call_sign": call_sign})
+    finally:
+        conn.close()
 
 
 @flask_app.route("/llm", methods=["GET"])
 def llm():
-    db = get_db()
-    conn = db[0]
-    curs = db[1]
+    global client
+    if client is None:
+        init_openai_client()
 
-    # Fetch all records where address is missing
-    data = conn.execute(
-        """\
-SELECT * FROM record WHERE address IS NULL"""
-    ).fetchall()
-
-    if not data:
-        return json.dumps(
-            {"status": 404, "info": "No records found with missing address"}
-        )
-
-    original_addresses = [row["original_address"] for row in data]
-    call_signs = [row["call_sign"] for row in data]
-    data = "\n".join(original_addresses)
-
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[
-            {
-                "role": "system",
-                "content": "你现在是一个信息提取器,从用户给到你的字段中提取并按以下格式输出:[收件人昵称 手机号 邮编 省名 完整地址 中国业余无线电呼号],不要输出其他任何内容,包括说明,如果该信息在用户提供给你的数据中不存在,就使用NULL代替,有多行消息就依次多行输出",
-            },
-            {
-                "role": "user",
-                "content": data,
-            },
-        ],
-        stream=False,
-    )
-
-    ai_data = response.choices[0].message.content
-    print(ai_data)
-    # Process the AI response and update the database
-    for line, call_sign in zip(ai_data.splitlines(), call_signs):
-        fields = line.split()
-        if len(fields) == 6:
-            name, phone, zip_code, province, address, _ = fields
-            conn.execute(
-                """\
-UPDATE record
-SET name = ?, phone = ?, zip_code = ?, province = ?, address = ?
-WHERE call_sign = ?""",
-                (name, phone, zip_code, province, address, call_sign),
+    conn, curs = get_db()
+    try:
+        data = conn.execute(
+            "SELECT * FROM record WHERE (name IS NULL OR address IS NULL OR phone IS NULL) AND info IS NOT NULL"
+        ).fetchall()
+        if not data:
+            return json.dumps(
+                {"status": 404, "info": "No records found with missing address"}
             )
 
-    conn.commit()
+        original_addresses = [row["info"] for row in data]  # 使用info字段
+        call_signs = [row["call_sign"] for row in data]
+        data_str = "\n".join(original_addresses)
 
-    return json.dumps(
-        {"status": 200, "info": "Processed successfully", "data": ai_data}
-    )
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你现在是一个信息提取器,从用户给到你的字段中提取并按以下格式输出:[收件人昵称 手机号 邮编 省名 完整地址 中国业余无线电呼号],不要输出其他任何内容,包括说明,如果该信息在用户提供给你的数据中不存在,就使用NULL代替,有多行消息就依次多行输出",
+                },
+                {"role": "user", "content": data_str},
+            ],
+            stream=False,
+        )
+
+        ai_data = response.choices[0].message.content
+        if ai_data:
+            print("AI分析结果:")
+            print(ai_data)
+
+            # 处理AI响应并更新数据库
+            for line, row in zip(ai_data.splitlines(), data):
+                fields = line.split()
+                call_sign = row["call_sign"]
+                if len(fields) == 6:
+                    name, phone, zip_code, province, address, _ = fields
+                    print(
+                        f"更新呼号 {call_sign}: {name}, {phone}, {zip_code}, {province}, {address}"
+                    )
+
+                    # 如果邮编是NULL，尝试获取
+                    if zip_code == "NULL":
+                        zip_code = get_zip_code(address) or "NULL"
+
+                    conn.execute(
+                        """UPDATE record 
+                        SET name = ?, phone = ?, zip_code = ?, province = ?, address = ? 
+                        WHERE call_sign = ?""",
+                        (name, phone, zip_code, province, address, call_sign),
+                    )
+                else:
+                    print(f"呼号 {call_sign} 的AI分析结果格式错误: {line}")
+
+            conn.commit()
+            return json.dumps(
+                {"status": 200, "info": "Processed successfully", "data": ai_data}
+            )
+        else:
+            return json.dumps({"status": 404, "info": "AI analysis failed"})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/mark_sent", methods=["GET"])
+def mark_sent():
+    """标记卡片已发送"""
+    conn, curs = get_db()
+    try:
+        call_sign = flask.request.args.get("call_sign")
+        # 使用带时区的当前时间
+        current_time = datetime.datetime.now(shanghai_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn.execute(
+            "UPDATE record SET send_time=?, status='sent' WHERE call_sign=?",
+            (current_time, call_sign),
+        )
+        conn.commit()
+
+        print(f"呼号 {call_sign} 已标记为已发送")
+        return json.dumps({"status": 200, "info": "标记为已发送"})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/receipt", methods=["GET"])
+def receipt():
+    """处理友台回执"""
+    conn, curs = get_db()
+    try:
+        call_sign = flask.request.args.get("call_sign")
+        # 使用带时区的当前时间
+        current_time = datetime.datetime.now(shanghai_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn.execute(
+            "UPDATE record SET receipt_time=?, status='received' WHERE call_sign=?",
+            (current_time, call_sign),
+        )
+        conn.commit()
+
+        # 发送提醒
+        message = f"呼号{call_sign}已回执"
+        send_email_reminder(call_sign, message)
+        send_wechat_reminder(call_sign, message)
+        print(message)
+
+        return json.dumps({"status": 200, "info": "回执成功"})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/resend", methods=["GET"])
+def resend():
+    """标记卡片需要补发"""
+    conn, curs = get_db()
+    try:
+        call_sign = flask.request.args.get("call_sign")
+        # 使用带时区的当前时间
+        current_time = datetime.datetime.now(shanghai_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+        # 先检查记录是否存在
+        record = conn.execute(
+            "SELECT * FROM record WHERE call_sign=?", (call_sign,)
+        ).fetchone()
+
+        if not record:
+            return json.dumps({"status": 404, "info": "呼号不存在"}), 404
+
+        # 更新记录
+        conn.execute(
+            "UPDATE record SET reissue_time=?, status='resend' WHERE call_sign=?",
+            (current_time, call_sign),
+        )
+        conn.commit()
+
+        # 发送提醒
+        message = f"呼号{call_sign}需要补发"
+        send_email_reminder(call_sign, message)
+        send_wechat_reminder(call_sign, message)
+        print(message)
+
+        return json.dumps({"status": 200, "info": "已标记为需要补发"})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/get_expired", methods=["GET"])
+def get_expired():
+    """获取超过一个月未回执的记录"""
+    conn, curs = get_db()
+    try:
+        # 使用带时区的当前时间
+        one_month_ago = datetime.datetime.now(shanghai_tz) - datetime.timedelta(days=30)
+        one_month_ago_str = one_month_ago.strftime("%Y-%m-%d %H:%M:%S")
+
+        records = conn.execute(
+            """SELECT call_sign, add_time, send_time 
+            FROM record 
+            WHERE status='sent' AND send_time < ?""",
+            (one_month_ago_str,),
+        ).fetchall()
+
+        result = [dict(row) for row in records]
+        return json.dumps({"status": 200, "data": result})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/get_resend_list", methods=["GET"])
+def get_resend_list():
+    """获取需要补发的记录列表"""
+    conn, curs = get_db()
+    try:
+        records = conn.execute(
+            "SELECT call_sign, add_time, send_time, reissue_time FROM record WHERE status='resend'"
+        ).fetchall()
+
+        result = [dict(row) for row in records]
+        return json.dumps({"status": 200, "data": result})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/get_all_records", methods=["GET"])
+def get_all_records():
+    """获取所有记录"""
+    conn, curs = get_db()
+    try:
+        records = conn.execute("SELECT * FROM record").fetchall()
+        result = [dict(row) for row in records]
+        return json.dumps({"status": 200, "data": result})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/delete_record", methods=["GET"])
+def delete_record():
+    """删除记录"""
+    call_sign = flask.request.args.get("call_sign")
+    if not call_sign:
+        return json.dumps({"status": 400, "message": "缺少呼号参数"})
+
+    conn, curs = get_db()
+    try:
+        # 检查记录是否存在
+        existing = conn.execute(
+            "SELECT call_sign FROM record WHERE call_sign = ?", (call_sign,)
+        ).fetchone()
+
+        if not existing:
+            return json.dumps({"status": 404, "message": "记录不存在"})
+
+        # 删除记录
+        conn.execute("DELETE FROM record WHERE call_sign = ?", (call_sign,))
+        conn.commit()
+
+        return json.dumps({"status": 200, "message": "记录删除成功"})
+    except Exception as e:
+        conn.rollback()
+        return json.dumps({"status": 500, "message": f"删除失败: {str(e)}"})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/edit_record", methods=["POST"])
+def edit_record():
+    """编辑记录信息"""
+    try:
+        data = flask.request.get_json()
+        if not data:
+            return json.dumps({"status": 400, "message": "请求数据为空"})
+
+        call_sign = data.get("call_sign")
+        if not call_sign:
+            return json.dumps({"status": 400, "message": "缺少呼号参数"})
+
+        conn, curs = get_db()
+        try:
+            # 检查记录是否存在
+            existing = conn.execute(
+                "SELECT call_sign FROM record WHERE call_sign = ?", (call_sign,)
+            ).fetchone()
+
+            if not existing:
+                return json.dumps({"status": 404, "message": "记录不存在"})
+
+            # 更新记录
+            update_fields = []
+            update_values = []
+
+            if "name" in data:
+                update_fields.append("name = ?")
+                update_values.append(data["name"])
+            if "phone" in data:
+                update_fields.append("phone = ?")
+                update_values.append(data["phone"])
+            if "address" in data:
+                update_fields.append("address = ?")
+                update_values.append(data["address"])
+            if "province" in data:
+                update_fields.append("province = ?")
+                update_values.append(data["province"])
+            if "zip_code" in data:
+                update_fields.append("zip_code = ?")
+                update_values.append(data["zip_code"])
+            if "info" in data:
+                update_fields.append("info = ?")
+                update_values.append(data["info"])
+
+            if not update_fields:
+                return json.dumps({"status": 400, "message": "没有需要更新的字段"})
+
+            # 执行更新
+            update_values.append(call_sign)
+            sql = f"UPDATE record SET {', '.join(update_fields)} WHERE call_sign = ?"
+            conn.execute(sql, update_values)
+            conn.commit()
+
+            return json.dumps({"status": 200, "message": "记录更新成功"})
+        except Exception as e:
+            conn.rollback()
+            return json.dumps({"status": 500, "message": f"更新失败: {str(e)}"})
+        finally:
+            conn.close()
+    except Exception as e:
+        return json.dumps({"status": 500, "message": f"请求处理失败: {str(e)}"})
+
+
+@flask_app.route("/llm_single", methods=["GET"])
+def llm_single():
+    """对单个记录进行AI地址分析"""
+    global client
+    if client is None:
+        init_openai_client()
+
+    call_sign = flask.request.args.get("call_sign")
+    if not call_sign:
+        return json.dumps({"status": 400, "message": "缺少呼号参数"})
+
+    conn, curs = get_db()
+    try:
+        # 检查记录是否存在且需要处理
+        record = conn.execute(
+            "SELECT call_sign, info FROM record WHERE call_sign = ? AND (name IS NULL OR phone IS NULL OR address IS NULL) AND info IS NOT NULL",
+            (call_sign,),
+        ).fetchone()
+
+        if not record:
+            return json.dumps({"status": 404, "message": "记录不存在或已处理过"})
+
+        # 使用AI处理地址信息
+        try:
+            print(f"正在处理呼号: {call_sign}")
+            print(f"原始信息: {record['info']}")
+
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": '你是一个地址信息解析专家。请从用户提供的地址信息中提取出姓名、电话号码、详细地址等信息，并以JSON格式返回。返回格式：{"name": "姓名", "phone": "电话", "address": "详细地址", "province": "省份"}',
+                    },
+                    {
+                        "role": "user",
+                        "content": f"请解析以下地址信息：{record['info']}",
+                    },
+                ],
+                temperature=0.1,
+            )
+
+            result_text = response.choices[0].message.content
+            print(f"AI返回原始内容: {result_text}")
+
+            if not result_text:
+                print("AI返回内容为空")
+                return json.dumps({"status": 500, "message": "AI返回内容为空"})
+
+            result_text = result_text.strip()
+            print(f"AI返回清理后内容: {result_text}")
+            result_text = result_text.replace("```json", "").replace("```", "")
+            # 尝试解析AI返回的JSON
+            try:
+                ai_result = json.loads(result_text)
+                print(f"JSON解析成功: {ai_result}")
+
+                name = ai_result.get("name", "").strip()
+                phone = ai_result.get("phone", "").strip()
+                address = ai_result.get("address", "").strip()
+                province = ai_result.get("province", "").strip()
+                name = call_sign if name.strip() == "NULL" or name == None else name
+
+                print(
+                    f"提取的信息 - 姓名: {name}, 电话: {phone}, 地址: {address}, 省份: {province}"
+                )
+
+                # 获取邮编
+                zip_code = ""
+                if address:
+                    zip_code = get_zip_code(address)
+                    print(f"获取到的邮编: {zip_code}")
+
+                # 更新数据库
+                conn.execute(
+                    "UPDATE record SET name=?, phone=?, address=?, province=?, zip_code=? WHERE call_sign=?",
+                    (name, phone, address, province, zip_code, call_sign),
+                )
+                conn.commit()
+                print(f"数据库更新成功")
+
+                return json.dumps({"status": 200, "message": "AI处理完成"})
+
+            except json.JSONDecodeError as e:
+                print(f"JSON解析失败: {e}")
+                print(f"尝试解析的内容: {result_text}")
+                return json.dumps({"status": 500, "message": "AI返回格式错误"})
+
+        except Exception as e:
+            print(f"AI处理失败: {str(e)}")
+            return json.dumps({"status": 500, "message": f"AI处理失败: {str(e)}"})
+
+    except Exception as e:
+        return json.dumps({"status": 500, "message": f"处理失败: {str(e)}"})
+    finally:
+        conn.close()
+
+
+def check_receipt_timeout():
+    """定时检查超时未回执的记录"""
+    with flask_app.app_context():
+        conn, curs = get_db()
+        try:
+            # 使用带时区的当前时间
+            one_month_ago = datetime.datetime.now(shanghai_tz) - datetime.timedelta(
+                days=30
+            )
+            one_month_ago_str = one_month_ago.strftime("%Y-%m-%d %H:%M:%S")
+
+            records = conn.execute(
+                "SELECT call_sign FROM record WHERE status='sent' AND send_time < ?",
+                (one_month_ago_str,),
+            ).fetchall()
+
+            print(f"检查超时记录，找到 {len(records)} 条记录")
+
+            for record in records:
+                call_sign = record["call_sign"]
+                # 发送提醒
+                message = f"呼号{call_sign}超过一个月未回执，请手动询问"
+                send_email_reminder(call_sign, message)
+                send_wechat_reminder(call_sign, message)
+                print(message)
+        except Exception as e:
+            print(f"检查超时记录时出错: {str(e)}")
+        finally:
+            conn.close()
 
 
 def get_db():
+    """获取数据库连接"""
     conn = sqlite3.connect("database.db")
     conn.row_factory = sqlite3.Row
-    curs = conn.cursor()
-    return conn, curs
+    return conn, conn.cursor()
 
 
 def init_db():
-    db = get_db()
-    conn = db[0]
-    curs = db[1]
-    conn.execute(
-        """\
-CREATE TABLE IF NOT EXISTS record (
-    call_sign TEXT PRIMARY KEY,
-    province TEXT NULL,
-    address TEXT NULL,
-    phone TEXT NULL,
-    name TEXT NULL,
-    zip_code TEXT NULL,
-    status TEXT,
-    add_time TEXT,
-    send_time TEXT NULL,
-    receipt_time TEXT NULL,
-    reissue_time TEXT NULL,
-    original_address TEXT
-    )
-"""
+    """初始化数据库"""
+    conn, curs = get_db()
+    try:
+        conn.execute(
+            """
+        CREATE TABLE IF NOT EXISTS record (
+            call_sign TEXT PRIMARY KEY,
+            province TEXT,
+            address TEXT,
+            phone TEXT,
+            name TEXT,
+            zip_code TEXT,
+            status TEXT DEFAULT 'pending',
+            add_time TEXT,
+            send_time TEXT,
+            receipt_time TEXT,
+            reissue_time TEXT,
+            info TEXT,
+            original_address TEXT
+        )
+        """
+        )
+
+        # 检查是否需要添加info字段（用于兼容旧数据库）
+        try:
+            conn.execute("SELECT info FROM record LIMIT 1")
+        except sqlite3.OperationalError:
+            # info字段不存在，添加它
+            conn.execute("ALTER TABLE record ADD COLUMN info TEXT")
+            # 将existing original_address data copy to info field
+            conn.execute("UPDATE record SET info = original_address WHERE info IS NULL")
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# 全局OpenAI客户端
+client = None
+
+
+def init_openai_client():
+    global client
+    client = OpenAI(
+        api_key="你的Deepseek api key",
+        base_url="https://api.deepseek.com",
     )
 
 
 if __name__ == "__main__":
-
     init_db()
-    client = OpenAI(
-        api_key="你的Deepseek密钥",
-        base_url="https://api.deepseek.com",
+    init_openai_client()
+
+    # 初始化定时任务
+    scheduler = BackgroundScheduler(timezone=shanghai_tz)
+    scheduler.add_job(
+        check_receipt_timeout, "cron", hour=9, minute=0  # 每天早上9点检查
     )
+    scheduler.start()
+
+    print("启动定时任务，每天上午9点检查超时记录")
     flask_app.run("0.0.0.0", debug=False, port=5000)

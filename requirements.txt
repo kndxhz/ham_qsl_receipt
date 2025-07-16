@@ -1,0 +1,9 @@
+flask
+sqlite3
+requests
+beautifulsoup4
+datetime
+pytz
+openai
+apscheduler
+flask-cors
