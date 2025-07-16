@@ -31,6 +31,13 @@ export const apiService = {
     })
   },
 
+  // 检查呼号是否存在
+  checkCallSign(callSign) {
+    return api.get('/check_callsign', {
+      params: { call_sign: callSign }
+    })
+  },
+
   // 处理回执
   receipt(callSign) {
     return api.get('/receipt', {

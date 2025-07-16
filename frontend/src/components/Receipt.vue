@@ -177,6 +177,20 @@ export default {
 
         loading.value = true
         
+        // 先检查呼号是否存在
+        try {
+          await apiService.checkCallSign(receiptData.callSign.toUpperCase())
+        } catch (checkError) {
+          if (checkError.response?.status === 404) {
+            notFoundCallSign.value = receiptData.callSign.toUpperCase()
+            notFoundDialogVisible.value = true
+            return
+          } else {
+            throw checkError // 其他错误继续抛出
+          }
+        }
+        
+        // 呼号存在，进行回执操作
         const response = await apiService.receipt(receiptData.callSign.toUpperCase())
         
         if (response.data.status === 200) {
@@ -185,16 +199,11 @@ export default {
           receiptData.callSign = ''
           receiptForm.value.resetFields()
         } else {
-          ElMessage.error('回执失败，请检查呼号是否正确')
+          ElMessage.error('回执失败，请稍后重试')
         }
       } catch (error) {
         console.error('回执失败:', error)
-        if (error.response?.status === 404) {
-          notFoundCallSign.value = receiptData.callSign.toUpperCase()
-          notFoundDialogVisible.value = true
-        } else {
-          ElMessage.error('回执失败，请稍后重试')
-        }
+        ElMessage.error('回执失败，请稍后重试')
       } finally {
         loading.value = false
       }

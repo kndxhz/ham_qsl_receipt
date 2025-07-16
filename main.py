@@ -19,7 +19,7 @@ CORS(flask_app)  # 启用CORS
 shanghai_tz = pytz.timezone("Asia/Shanghai")
 
 # 管理员密码（在实际部署时应该使用环境变量）
-ADMIN_PASSWORD = "你的密码"
+ADMIN_PASSWORD = "passw0rd"
 
 # 存储有效的管理员session
 admin_sessions = {}
@@ -305,6 +305,31 @@ def mark_sent():
 
         print(f"呼号 {call_sign} 已标记为已发送")
         return json.dumps({"status": 200, "info": "标记为已发送"})
+    finally:
+        conn.close()
+
+
+@flask_app.route("/check_callsign", methods=["GET"])
+def check_callsign():
+    """检查呼号是否存在"""
+    conn, curs = get_db()
+    try:
+        call_sign = flask.request.args.get("call_sign")
+        if not call_sign:
+            return json.dumps({"status": 400, "info": "缺少呼号参数"}), 400
+
+        # 查询呼号是否存在
+        result = curs.execute(
+            "SELECT call_sign FROM record WHERE call_sign=?", (call_sign,)
+        ).fetchone()
+
+        if result:
+            return json.dumps({"status": 200, "exists": True, "info": "呼号存在"})
+        else:
+            return (
+                json.dumps({"status": 404, "exists": False, "info": "呼号不存在"}),
+                404,
+            )
     finally:
         conn.close()
 
@@ -746,7 +771,7 @@ client = None
 def init_openai_client():
     global client
     client = OpenAI(
-        api_key="你的API密钥",
+        api_key="sk-09cce56bce4f4709bfcc8cba56ced0e3",
         base_url="https://api.deepseek.com",
     )
 
