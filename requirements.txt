@@ -6,3 +6,5 @@ pytz
 openai
 apscheduler
 flask-cors
+selenium
+time

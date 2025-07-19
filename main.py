@@ -12,6 +12,15 @@ from openai import OpenAI
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask_cors import CORS  # 添加CORS支持
 
+
+import time
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from urllib.parse import quote
+
 flask_app = flask.Flask(__name__)
 CORS(flask_app)  # 启用CORS
 
@@ -19,7 +28,7 @@ CORS(flask_app)  # 启用CORS
 shanghai_tz = pytz.timezone("Asia/Shanghai")
 
 # 管理员密码（在实际部署时应该使用环境变量）
-ADMIN_PASSWORD = "passw0rd"
+ADMIN_PASSWORD = "你的密码
 
 # 存储有效的管理员session
 admin_sessions = {}
@@ -139,39 +148,51 @@ def send_wechat_reminder(call_sign, message):
 
 
 def get_zip_code(address: str):
-    headers = {
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-        "cache-control": "no-cache",
-        "pragma": "no-cache",
-        "priority": "u=0, i",
-        "sec-ch-ua": '"Microsoft Edge";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-fetch-dest": "document",
-        "sec-fetch-mode": "navigate",
-        "sec-fetch-site": "none",
-        "sec-fetch-user": "?1",
-        "upgrade-insecure-requests": "1",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
-    }
-    while address:
-        url = f"https://www.youbianku.com/{address}"
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            soup = bs4.BeautifulSoup(response.text, "html.parser")
-            heading_element = soup.find("h1", id="firstHeading", class_="firstHeading")
-            if heading_element:
-                text = heading_element.text
-                if "：" in text:
-                    zip_code = text.split("：")[1]
-                    return zip_code
-        except Exception as e:
-            pass
-        address = address[:-1]
-    return None
+    # Set up Chrome options
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Run in headless mode (no UI)
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"
+    )
+
+    # Initialize the WebDriver
+    driver = webdriver.Chrome(options=chrome_options)
+
+    try:
+        # First, visit the main site to get cookies
+        driver.get("https://www.youbianku.com/")
+        time.sleep(2)  # Wait for JavaScript to load
+
+        # URL-encode the address for the search URL
+        encoded_address = quote(address)
+
+        # Construct and navigate to the search URL
+        search_url = (
+            f"https://www.youbianku.com/SearchResults?address={encoded_address}"
+        )
+        driver.get(search_url)
+
+        # Wait for the page to load completely including JavaScript
+        wait = WebDriverWait(driver, 10)
+        selector = "#mw-content-text > div.mw-parser-output > div > ul > div > table > tbody > tr:nth-child(3) > td > a"
+        element = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+        )
+
+        if element:
+            return element.text.strip()
+        else:
+            print("No elements found matching the CSS selector")
+            return None
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+    finally:
+        # Make sure to close the browser
+        driver.quit()
 
 
 @flask_app.route("/zip_code", methods=["GET"])
@@ -212,77 +233,6 @@ def add_record():
         )
         conn.commit()
         return json.dumps({"status": 200, "info": "ok", "call_sign": call_sign})
-    finally:
-        conn.close()
-
-
-@flask_app.route("/llm", methods=["GET"])
-@admin_required
-def llm():
-    global client
-    if client is None:
-        init_openai_client()
-
-    conn, curs = get_db()
-    try:
-        data = conn.execute(
-            "SELECT * FROM record WHERE (name IS NULL OR address IS NULL OR phone IS NULL) AND info IS NOT NULL"
-        ).fetchall()
-        if not data:
-            return json.dumps(
-                {"status": 404, "info": "No records found with missing address"}
-            )
-
-        original_addresses = [row["info"] for row in data]  # 使用info字段
-        call_signs = [row["call_sign"] for row in data]
-        data_str = "\n".join(original_addresses)
-
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你现在是一个信息提取器,从用户给到你的字段中提取并按以下格式输出:[收件人昵称 手机号 邮编 省名 完整地址 中国业余无线电呼号],不要输出其他任何内容,包括说明,如果该信息在用户提供给你的数据中不存在,就使用NULL代替,有多行消息就依次多行输出",
-                },
-                {"role": "user", "content": data_str},
-            ],
-            stream=False,
-        )
-
-        ai_data = response.choices[0].message.content
-        if ai_data:
-            print("AI分析结果:")
-            print(ai_data)
-
-            # 处理AI响应并更新数据库
-            for line, row in zip(ai_data.splitlines(), data):
-                fields = line.split()
-                call_sign = row["call_sign"]
-                if len(fields) == 6:
-                    name, phone, zip_code, province, address, _ = fields
-                    print(
-                        f"更新呼号 {call_sign}: {name}, {phone}, {zip_code}, {province}, {address}"
-                    )
-
-                    # 如果邮编是NULL，尝试获取
-                    if zip_code == "NULL":
-                        zip_code = get_zip_code(address) or "NULL"
-
-                    conn.execute(
-                        """UPDATE record 
-                        SET name = ?, phone = ?, zip_code = ?, province = ?, address = ? 
-                        WHERE call_sign = ?""",
-                        (name, phone, zip_code, province, address, call_sign),
-                    )
-                else:
-                    print(f"呼号 {call_sign} 的AI分析结果格式错误: {line}")
-
-            conn.commit()
-            return json.dumps(
-                {"status": 200, "info": "Processed successfully", "data": ai_data}
-            )
-        else:
-            return json.dumps({"status": 404, "info": "AI analysis failed"})
     finally:
         conn.close()
 
@@ -622,7 +572,7 @@ def llm_single():
                 messages=[
                     {
                         "role": "system",
-                        "content": '你是一个地址信息解析专家。请从用户提供的地址信息中提取出姓名、电话号码、详细地址等信息，并以JSON格式返回。返回格式：{"name": "姓名", "phone": "电话", "address": "详细地址", "province": "省份"}',
+                        "content": '你是一个地址信息解析专家。请从用户提供的地址信息中提取出姓名、电话号码、详细地址、邮编等信息，并以JSON格式返回。手机号不要带有+86,如果有单独一行的6位数整数则默认为邮编.返回格式：{"name": "姓名", "phone": "电话", "address": "详细地址", "province": "省份", "zip_code": "邮编"}。如果无法确定某个字段，请留空。',
                     },
                     {
                         "role": "user",
@@ -651,17 +601,24 @@ def llm_single():
                 phone = ai_result.get("phone", "").strip()
                 address = ai_result.get("address", "").strip()
                 province = ai_result.get("province", "").strip()
+                ai_zip_code = ai_result.get("zip_code", "").strip()
                 name = call_sign if name.strip() == "NULL" or name == None else name
 
                 print(
-                    f"提取的信息 - 姓名: {name}, 电话: {phone}, 地址: {address}, 省份: {province}"
+                    f"提取的信息 - 姓名: {name}, 电话: {phone}, 地址: {address}, 省份: {province}, AI邮编: {ai_zip_code}"
                 )
 
-                # 获取邮编
+                # 获取邮编 - 优先使用AI分析的邮编，如果没有则尝试通过地址获取
                 zip_code = ""
-                if address:
+                if ai_zip_code:
+                    zip_code = ai_zip_code
+                    print(f"使用AI分析的邮编: {zip_code}")
+                elif address:
                     zip_code = get_zip_code(address)
-                    print(f"获取到的邮编: {zip_code}")
+                    if zip_code:
+                        print(f"通过地址获取到的邮编: {zip_code}")
+                    else:
+                        print(f"无法获取到邮编")
 
                 # 更新数据库
                 conn.execute(
@@ -771,7 +728,7 @@ client = None
 def init_openai_client():
     global client
     client = OpenAI(
-        api_key="sk-09cce56bce4f4709bfcc8cba56ced0e3",
+        api_key="你的ds api key",
         base_url="https://api.deepseek.com",
     )
 
