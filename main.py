@@ -8,27 +8,35 @@ import datetime
 import pytz  # 添加pytz库来处理时区
 import hashlib
 import secrets
+import threading  # 添加线程支持用于后台任务
+import logging
 from openai import OpenAI
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask_cors import CORS  # 添加CORS支持
-
-
 import time
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from urllib.parse import quote
+import re
+import random
 
 flask_app = flask.Flask(__name__)
 CORS(flask_app)  # 启用CORS
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),  # 控制台输出
+        logging.FileHandler("ham_qsl.log", encoding="utf-8"),  # 文件输出
+    ],
+)
+logger = logging.getLogger(__name__)
 
 # 设置时区
 shanghai_tz = pytz.timezone("Asia/Shanghai")
 
 # 管理员密码（在实际部署时应该使用环境变量）
-ADMIN_PASSWORD = "你的密码
+ADMIN_PASSWORD = "你的密码"
 
 # 存储有效的管理员session
 admin_sessions = {}
@@ -136,74 +144,113 @@ def admin_verify():
 def send_email_reminder(call_sign, message):
     """邮件提醒函数（留空供用户自定义实现）"""
     # 用户自定义邮件发送逻辑
-    print(f"邮件提醒: {call_sign} - {message}")
+    logger.info(f"邮件提醒: {call_sign} - {message}")
     pass
 
 
 def send_wechat_reminder(call_sign, message):
     """微信提醒函数（留空供用户自定义实现）"""
     # 用户自定义微信发送逻辑
-    print(f"微信提醒: {call_sign} - {message}")
+    logger.info(f"微信提醒: {call_sign} - {message}")
     pass
 
 
 def get_zip_code(address: str):
-    # Set up Chrome options
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Run in headless mode (no UI)
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"
-    )
+    headers = {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+        "cache-control": "no-cache",
+        "pragma": "no-cache",
+        "priority": "u=0, i",
+        "sec-ch-ua": '"Microsoft Edge";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "sec-fetch-user": "?1",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+    }
 
-    # Initialize the WebDriver
-    driver = webdriver.Chrome(options=chrome_options)
+    while address:
+        url = f"https://www.chashudi.com/search/?keyword={address}"
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            soup = bs4.BeautifulSoup(response.text, "html.parser")
+            # 查找指定xpath对应的元素
+            # /html/body/div[1]/div[2]/div/div/div[2]/div[2]/div[2]/table/tbody/tr[1]/td[2]/a
+            # 用css选择器实现
+            heading_element = soup.select_one(
+                "body > div.wrapper > div.container > div > div > div.bd > div:nth-child(2) > div.table-inner > table > tbody > tr:nth-child(1) > td:nth-child(2) > a"
+            )
 
-    try:
-        # First, visit the main site to get cookies
-        driver.get("https://www.youbianku.com/")
-        time.sleep(2)  # Wait for JavaScript to load
+            if heading_element:
+                text = heading_element.text
+                return text.strip()  # 返回邮政编码
+        except Exception as e:
+            # print(f"匹配错误: {e}")
+            pass
+        logger.debug(f"尝试: {address}")
+        address = address[:-1]
 
-        # URL-encode the address for the search URL
-        encoded_address = quote(address)
-
-        # Construct and navigate to the search URL
-        search_url = (
-            f"https://www.youbianku.com/SearchResults?address={encoded_address}"
-        )
-        driver.get(search_url)
-
-        # Wait for the page to load completely including JavaScript
-        wait = WebDriverWait(driver, 10)
-        selector = "#mw-content-text > div.mw-parser-output > div > ul > div > table > tbody > tr:nth-child(3) > td > a"
-        element = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-        )
-
-        if element:
-            return element.text.strip()
-        else:
-            print("No elements found matching the CSS selector")
-            return None
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-    finally:
-        # Make sure to close the browser
-        driver.quit()
+    return None
 
 
-@flask_app.route("/zip_code", methods=["GET"])
-def zip_code_():
-    request = flask.request.args
-    address = request.get("address")
-    if address:
-        zip_code = get_zip_code(address)
-        if zip_code:
-            return json.dumps({"zip_code": int(zip_code)})
-    return json.dumps({"zip_code": -1}), 404
+def get_zip_code_to_db(address: str, call_sign: str):
+    headers = {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+        "cache-control": "no-cache",
+        "pragma": "no-cache",
+        "priority": "u=0, i",
+        "sec-ch-ua": '"Microsoft Edge";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "sec-fetch-user": "?1",
+        "upgrade-insecure-requests": "1",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+    }
+
+    while address:
+        url = f"https://www.chashudi.com/search/?keyword={address}"
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            soup = bs4.BeautifulSoup(response.text, "html.parser")
+            # 查找指定xpath对应的元素
+            # /html/body/div[1]/div[2]/div/div/div[2]/div[2]/div[2]/table/tbody/tr[1]/td[2]/a
+            # 用css选择器实现
+            heading_element = soup.select_one(
+                "body > div.wrapper > div.container > div > div > div.bd > div:nth-child(2) > div.table-inner > table > tbody > tr:nth-child(1) > td:nth-child(2) > a"
+            )
+
+            if heading_element:
+                text = heading_element.text
+                # 直接写入数据库
+                conn, curs = get_db()
+                try:
+                    conn.execute(
+                        "UPDATE record SET zip_code=? WHERE call_sign=?",
+                        (text.strip(), call_sign),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+                return text.strip()  # 返回邮政编码
+        except Exception as e:
+            # print(f"匹配错误: {e}")
+            pass
+        logger.debug(f"尝试: {address}")
+        address = address[:-1]
+
+    return None
 
 
 @flask_app.route("/")
@@ -253,7 +300,7 @@ def mark_sent():
         )
         conn.commit()
 
-        print(f"呼号 {call_sign} 已标记为已发送")
+        logger.info(f"呼号 {call_sign} 已标记为已发送")
         return json.dumps({"status": 200, "info": "标记为已发送"})
     finally:
         conn.close()
@@ -303,7 +350,7 @@ def receipt():
         message = f"呼号{call_sign}已回执"
         send_email_reminder(call_sign, message)
         send_wechat_reminder(call_sign, message)
-        print(message)
+        logger.info(message)
 
         return json.dumps({"status": 200, "info": "回执成功"})
     finally:
@@ -350,7 +397,7 @@ def mark_received():
         send_email_reminder(call_sign, message)
         send_wechat_reminder(call_sign, message)
 
-        print(f"呼号 {call_sign} 已被管理员标记为已回执")
+        logger.info(f"呼号 {call_sign} 已被管理员标记为已回执")
         return json.dumps({"status": 200, "message": "已标记为已回执"})
     finally:
         conn.close()
@@ -385,7 +432,7 @@ def resend():
         message = f"呼号{call_sign}需要补发"
         send_email_reminder(call_sign, message)
         send_wechat_reminder(call_sign, message)
-        print(message)
+        logger.info(message)
 
         return json.dumps({"status": 200, "info": "已标记为需要补发"})
     finally:
@@ -564,10 +611,10 @@ def llm_single():
 
         # 使用AI处理地址信息
         try:
-            print(f"正在处理呼号: {call_sign}")
-            print(f"原始信息: {record['info']}")
+            logger.debug(f"正在处理呼号: {call_sign}")
+            logger.debug(f"原始信息: {record['info']}")
 
-            response = client.chat.completions.create(
+            response = client.chat.completions.create(  # type: ignore
                 model="deepseek-chat",
                 messages=[
                     {
@@ -583,19 +630,19 @@ def llm_single():
             )
 
             result_text = response.choices[0].message.content
-            print(f"AI返回原始内容: {result_text}")
+            logger.debug(f"AI返回原始内容: {result_text}")
 
             if not result_text:
-                print("AI返回内容为空")
+                logger.error("AI返回内容为空")
                 return json.dumps({"status": 500, "message": "AI返回内容为空"})
 
             result_text = result_text.strip()
-            print(f"AI返回清理后内容: {result_text}")
+            logger.debug(f"AI返回清理后内容: {result_text}")
             result_text = result_text.replace("```json", "").replace("```", "")
             # 尝试解析AI返回的JSON
             try:
                 ai_result = json.loads(result_text)
-                print(f"JSON解析成功: {ai_result}")
+                logger.debug(f"JSON解析成功: {ai_result}")
 
                 name = ai_result.get("name", "").strip()
                 phone = ai_result.get("phone", "").strip()
@@ -604,39 +651,55 @@ def llm_single():
                 ai_zip_code = ai_result.get("zip_code", "").strip()
                 name = call_sign if name.strip() == "NULL" or name == None else name
 
-                print(
+                logger.debug(
                     f"提取的信息 - 姓名: {name}, 电话: {phone}, 地址: {address}, 省份: {province}, AI邮编: {ai_zip_code}"
                 )
 
-                # 获取邮编 - 优先使用AI分析的邮编，如果没有则尝试通过地址获取
+                # 处理邮编 - 如果AI已经提取到邮编，直接使用；否则先更新其他信息，然后后台获取邮编
                 zip_code = ""
+                need_background_fetch = False
+
                 if ai_zip_code:
                     zip_code = ai_zip_code
-                    print(f"使用AI分析的邮编: {zip_code}")
+                    logger.info(f"使用AI分析的邮编: {zip_code}")
                 elif address:
-                    zip_code = get_zip_code(address)
-                    if zip_code:
-                        print(f"通过地址获取到的邮编: {zip_code}")
-                    else:
-                        print(f"无法获取到邮编")
+                    # 如果有地址但没有AI邮编，标记需要后台获取
+                    need_background_fetch = True
+                    logger.info(f"需要后台获取邮编，地址: {address}")
 
-                # 更新数据库
+                # 立即更新数据库中的基本信息
                 conn.execute(
                     "UPDATE record SET name=?, phone=?, address=?, province=?, zip_code=? WHERE call_sign=?",
                     (name, phone, address, province, zip_code, call_sign),
                 )
                 conn.commit()
-                print(f"数据库更新成功")
+                logger.info(f"基本信息已更新到数据库")
 
-                return json.dumps({"status": 200, "message": "AI处理完成"})
+                # 如果需要，启动后台任务获取邮编
+                if need_background_fetch:
+                    logger.info(f"启动后台任务获取邮编...")
+                    thread = threading.Thread(
+                        target=get_zip_code,
+                        args=(address, call_sign),
+                        daemon=True,
+                    )
+                    thread.start()
+
+                return json.dumps(
+                    {
+                        "status": 200,
+                        "message": "AI处理完成",
+                        "zip_code_fetching": need_background_fetch,
+                    }
+                )
 
             except json.JSONDecodeError as e:
-                print(f"JSON解析失败: {e}")
-                print(f"尝试解析的内容: {result_text}")
+                logger.error(f"JSON解析失败: {e}")
+                logger.error(f"尝试解析的内容: {result_text}")
                 return json.dumps({"status": 500, "message": "AI返回格式错误"})
 
         except Exception as e:
-            print(f"AI处理失败: {str(e)}")
+            logger.error(f"AI处理失败: {str(e)}")
             return json.dumps({"status": 500, "message": f"AI处理失败: {str(e)}"})
 
     except Exception as e:
@@ -661,7 +724,7 @@ def check_receipt_timeout():
                 (one_month_ago_str,),
             ).fetchall()
 
-            print(f"检查超时记录，找到 {len(records)} 条记录")
+            logger.info(f"检查超时记录，找到 {len(records)} 条记录")
 
             for record in records:
                 call_sign = record["call_sign"]
@@ -669,9 +732,9 @@ def check_receipt_timeout():
                 message = f"呼号{call_sign}超过一个月未回执，请手动询问"
                 send_email_reminder(call_sign, message)
                 send_wechat_reminder(call_sign, message)
-                print(message)
+                logger.warning(message)
         except Exception as e:
-            print(f"检查超时记录时出错: {str(e)}")
+            logger.error(f"检查超时记录时出错: {str(e)}")
         finally:
             conn.close()
 
@@ -744,5 +807,6 @@ if __name__ == "__main__":
     )
     scheduler.start()
 
-    print("启动定时任务，每天上午9点检查超时记录")
+    logger.info("启动定时任务，每天上午9点检查超时记录")
+    logger.info("HAM QSL Receipt系统启动完成")
     flask_app.run("0.0.0.0", debug=False, port=5000)
